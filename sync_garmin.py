@@ -24,20 +24,24 @@ TOKEN_FILE = Path.home() / ".garmin_tokens.json"
 TOKEN_ENV = "GARMIN_TOKEN_B64"
 
 
-def get_client_from_token_b64(token_b64: str) -> Garmin:
-    token_data = json.loads(base64.b64decode(token_b64).decode())
+def _build_client_from_token_dir(token_dir: Path) -> Garmin:
     client = Garmin()
-    client.set_tokens(
-        token_data.get("oauth1_token"), token_data.get("oauth2_token")
-    )
+    client.login(tokenstore=str(token_dir))
     return client
+
+
+def get_client_from_token_b64(token_b64: str) -> Garmin:
+    import tempfile
+    token_data = json.loads(base64.b64decode(token_b64).decode())
+    tmpdir = Path(tempfile.mkdtemp())
+    for stem, data in token_data.items():
+        (tmpdir / f"{stem}.json").write_text(json.dumps(data))
+    return _build_client_from_token_dir(tmpdir)
 
 
 def get_client_from_file() -> Garmin:
-    data = json.loads(TOKEN_FILE.read_text())
-    client = Garmin()
-    client.set_tokens(data.get("oauth1_token"), data.get("oauth2_token"))
-    return client
+    token_dir = Path.home() / ".garth"
+    return _build_client_from_token_dir(token_dir)
 
 
 def login_and_save() -> str:
@@ -46,38 +50,25 @@ def login_and_save() -> str:
     if not email or not password:
         sys.exit("Set GARMIN_EMAIL and GARMIN_PASSWORD environment variables first.")
 
+    token_dir = Path.home() / ".garmin_token_store"
+    token_dir.mkdir(exist_ok=True)
+
     client = Garmin(email, password)
-    client.login()
+    client.login()  # saves tokens to ~/.garth/ by default
 
-    oauth1 = client.garth.oauth1_token
-    oauth2 = client.garth.oauth2_token
+    # garth saves to ~/.garth/
+    garth_dir = Path.home() / ".garth"
+    token_data = {}
+    for fpath in garth_dir.iterdir():
+        if fpath.suffix == ".json":
+            token_data[fpath.stem] = json.loads(fpath.read_text())
 
-    token_data = {
-        "oauth1_token": {
-            "oauth_token": oauth1.oauth_token,
-            "oauth_token_secret": oauth1.oauth_token_secret,
-            "mfa_token": oauth1.mfa_token,
-            "mfa_expiration_timestamp": oauth1.mfa_expiration_timestamp,
-            "domain": oauth1.domain,
-        },
-        "oauth2_token": {
-            "scope": oauth2.scope,
-            "jti": oauth2.jti,
-            "token_type": oauth2.token_type,
-            "access_token": oauth2.access_token,
-            "refresh_token": oauth2.refresh_token,
-            "id_token": oauth2.id_token,
-            "expires_in": oauth2.expires_in,
-            "expires_at": oauth2.expires_at,
-            "refresh_token_expires_in": oauth2.refresh_token_expires_in,
-            "refresh_token_expires_at": oauth2.refresh_token_expires_at,
-        },
-    }
+    if not token_data:
+        sys.exit("Login succeeded but no token files found in ~/.garth/")
 
     TOKEN_FILE.write_text(json.dumps(token_data, indent=2))
-
     token_b64 = base64.b64encode(json.dumps(token_data).encode()).decode()
-    print("Login successful. Token saved to", TOKEN_FILE)
+    print("Login successful. Tokens saved to", token_dir)
     print("\nBase64 token bundle (save this as GARMIN_TOKEN_B64 secret):\n")
     print(token_b64)
     return token_b64
