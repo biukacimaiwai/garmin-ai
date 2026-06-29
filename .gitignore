@@ -1,0 +1,5 @@
+.garmin_tokens.json
+garmin/data.json
+__pycache__/
+*.pyc
+.env
